@@ -1,0 +1,600 @@
+#!/usr/bin/env python3
+
+import zipfile
+import json
+import sys
+import re
+import os
+import shutil
+import datetime
+from urllib.request import urlopen, urlretrieve
+from pathlib import Path
+from typing import List, Dict, Optional
+
+
+VERSION = '0.0.1'
+
+
+def print_info(*args, **kwargs):
+    '''
+    Helper to print INFO messages
+    '''
+    print('INFO: ', end="")
+    print(*args, **kwargs)
+
+
+def print_error(*args, **kwargs):
+    '''
+    Helper to print ERROR messages
+    '''
+    print('ERROR: ', end="")
+    print(*args, **kwargs)
+
+
+def parse_json(json_string: str) -> Dict:
+    '''
+    Convert pure JSON string to a python dictionary.
+    Tries to repair broken JSON along the way.
+    Somehow VS mod devs love to screw up JSON -.-
+    '''
+    if not json_string:
+        return {}
+
+    try:
+        return json.loads(json_string)
+    except json.JSONDecodeError:
+        pass
+
+    # Error while parsing happened if we get here
+    print_error(f'Error while parsing JSON:\n{json_string}')
+    print_info("Trying to repair broken JSON...")
+
+    # Find an replace actions to potentially fix broken JSON
+    repair_actions = (
+        # Remove superflous comma at end
+        (r'},\s*\}\Z', '}}'),
+        (r'],\s*\}\Z', ']}'),
+    )
+
+    for repair_action in repair_actions:
+        find, replace = repair_action
+        try:
+            json_string = re.sub(find, replace, json_string)
+            json_repaired = json.loads(json_string)
+            print_info('JSON successfully repaired')
+            return json_repaired
+        except json.JSONDecodeError:
+            pass
+
+    print_error('Could not repair JSON')
+
+    return {}
+
+
+class Version:
+    '''
+    Helper class to compare vintage story versions
+    '''
+    version_regex = re.compile(r'^(\d+\.)(\d+\.)(\d+)(\.\d+)?(\Z)')
+
+    def __init__(self, version: str):
+        '''
+        Parse given VS version
+        '''
+        self._version = version
+
+        self.major = self.minor = self.patch = self.rc = 0
+        self.is_rc = False
+
+        version = version.lower().strip()
+
+        # Cleanup string by only leaving digits and dots
+        # v1.20.0-rc.6 -> 1.20.0.6
+        version = re.sub(r'[^\d\.]', '', version)
+
+        # Verfiy version string with regex
+        if not re.search(self.version_regex, version):
+            raise AssertionError(
+                f'Version not valid: {version}'
+            )
+
+        version_group = tuple(int(v) for v in version.split('.'))
+        if len(version_group) == 3:
+            self.major, self.minor, self.patch = version_group
+        else:
+            self.major, self.minor, self.patch, self.rc = version_group
+            self.is_rc = True
+
+        self.version = version
+        self.version_group = version_group
+
+    def __repr__(self):
+        return self._version
+
+    def __str__(self):
+        return self._version
+
+    def __len__(self):
+        return len(self.version_group)
+
+    def __eq__(self, other):
+        '''
+        Implement "Version == Version"
+        '''
+        if len(self) != len(other):
+            return False
+
+        return self.version_group == other.version_group
+
+    def __gt__(self, other):
+        '''
+        Implement "Version > Version"
+        '''
+        if self.is_rc and other.is_rc:
+            return self.version_group > other.version_group
+
+        if self.is_rc and not other.is_rc:
+            greater = self.version_group[:3] > other.version_group[:3]
+            if not greater:
+                if self.version_group[:3] == other.version_group[:3]:
+                    return False
+            return greater
+
+        if not self.is_rc and other.is_rc:
+            greater = self.version_group[:3] > other.version_group[:3]
+            if not greater:
+                if self.version_group[:3] == other.version_group[:3]:
+                    return True
+            return greater
+
+        return self.version_group > other.version_group
+
+    def __ge__(self, other):
+        '''
+        Implement "Version >= Version"
+        '''
+        if self.version_group == other.version_group:
+            return True
+
+        if self.version_group > other.version_group:
+            return True
+
+        return False
+
+
+class Mod:
+    '''
+    Instance of a single modification
+    '''
+    def __init__(self, archive: Path):
+        self.archive = archive
+
+        self.modinfo = self._parse_archive()
+        if self.modinfo:
+            self.version = Version(self.modinfo.get('version', '0.0.0'))
+
+    def __getattr__(self, name: str):
+        return self.modinfo.get(name, '')
+
+    def _parse_archive(self) -> Dict:
+        '''
+        Parse a mod archive
+        '''
+        with zipfile.ZipFile(self.archive, 'r') as archive:
+            modinfo_string = archive.read(
+                'modinfo.json'
+            ).decode().strip()
+
+        modinfo = parse_json(modinfo_string)
+        if not modinfo:
+            print_error(f'Could not load mod: {self.archive}')
+            return {}
+
+        # Convert keys to all lowercase for easy access
+        return {
+            k.lower(): v for k, v in modinfo.items()
+        }
+
+    def print_default(self):
+        '''
+        Print basic information about mod
+        '''
+        print('{name} ({modid}) [{version}] - {desc}'.format(
+            name=self.name or self.archive or 'UNKNOWN',
+            modid=self.modid or 'ModID unknown',
+            version=self.version or 'Version unknown',
+            desc=self.description.replace('\n', ' ')[0:100] or 'No description'
+        ))
+
+    def print_all(self):
+        '''
+        Print all available information in modinfo.json about mod
+        '''
+        print(f'Mod located at "{self.archive}":')
+        print()
+        for k, v in self.modinfo.items():
+            print(f'{k}: {v}')
+
+
+class ModManager:
+    '''
+    Manages mods for one data path
+    '''
+    mods: List[Mod] = []
+
+    def __init__(self, data_path: Path, version: Version):
+        self.version = version
+
+        self.data_path = data_path
+        self.mods_path = self.data_path / 'Mods'
+        if not self.mods_path.exists():
+            print_error(f'Could not find Mods directory: {self.mods_path}')
+            sys.exit(2)
+
+        print_info('Loading mods...')
+        self._mods_refresh()
+
+    @staticmethod
+    def _get_mod_api(modid: str) -> Dict:
+        '''
+        Get mod status/information from official VS api
+        '''
+        api_url = 'https://mods.vintagestory.at/api/mod'
+        mod_status_raw = ''
+
+        if not modid:
+            return {}
+
+        # Retrieve mod information from vintage story API
+        try:
+            with urlopen(f'{api_url}/{modid}') as resp:
+                if resp.status != 200:
+                    print_error(
+                        'Error while accessing official vintage story API'
+                    )
+                    print_error(
+                        f'HTTP response from vintage story API: {resp.status}'
+                    )
+                    return {}
+                mod_status_raw = resp.read()
+        except Exception as exc:
+            print_error(
+                'Fatal error while accessing official vintage story API'
+            )
+            print_error(exc)
+            return {}
+
+        # Convert returned JSON to dictionary
+        mod_status = parse_json(mod_status_raw)
+        if not mod_status:
+            print_error('No valid response from vintage story API')
+
+        if mod_status.get('statuscode', '200') != '200':
+            print_error('Mod could not be found')
+            return {}
+
+        return mod_status.get('mod', {})
+
+    def _get_release_candidate(self, modstatus: Dict) -> Dict:
+        '''
+        Get install candidate of mod for our game/server version
+        '''
+        releases = modstatus.get('releases')
+        if not releases:
+            print_error('Could not parse mod API response')
+            return {}
+
+        # Seems like release are sorted desc
+        for release in releases:
+            for tag in release.get('tags', []):
+                if Version(tag) == self.version:
+                    return release
+        return {}
+
+    def _mods_refresh(self):
+        '''
+        Iterate over all mods in the mods directory and save them
+        for further use
+        '''
+        mod_archives = [
+            f for f in self.mods_path.iterdir()
+            if zipfile.is_zipfile(f)
+        ]
+
+        self.mods = [
+            Mod(f) for f in mod_archives
+        ]
+
+    def _mod_get(self, modid: str) -> Optional[Mod]:
+        '''
+        Get mod by modid or name (fallback)
+        '''
+        modid = modid.lower()
+
+        mod = [
+            mod for mod in self.mods
+            if modid in mod.modid.lower()
+        ]
+        if mod:
+            return mod[0]
+
+        mod = [
+            mod for mod in self.mods
+            if modid in mod.name.lower()
+        ]
+        if mod:
+            return mod[0]
+
+        return None
+
+    def mods_lists(self):
+        '''
+        Pretty print list of installed mods
+        '''
+        for mod in self.mods:
+            mod.print_default()
+
+    def mod_list(self, modid: str):
+        '''
+        List all modinfo field of singular mod by modid or general name
+        '''
+        if not modid:
+            self.mods_lists()
+            return
+
+        mod = self._mod_get(modid)
+        if not mod:
+            return
+
+        mod.print_all()
+
+    def mod_install(self, modid: str, update: bool = False):
+        '''
+        Install/update a mod by modid
+        TODO: Install by modname and not modid
+        '''
+        # Check if mod not already installed
+        mod_old = self._mod_get(modid)
+        if not update and mod_old:
+            print_error(f'Mod "{modid}" already installed')
+            return
+
+        # Get available mod versions and info
+        print_info('Get mod releases...')
+        modstatus = self._get_mod_api(modid)
+
+        if not modstatus:
+            print_error('Mod could not be found')
+            return
+
+        # Get newest release of the mod compatible to the game version
+        install_candidate: Dict = self._get_release_candidate(modstatus)
+
+        if not install_candidate:
+            print_error('No install candidate for your version found')
+            return
+
+        # Check if install candidate is an update to currently installed mod
+        if update and mod_old:
+            ic_version = Version(
+                install_candidate.get('modversion', '0.0.0')
+            )
+            if str(ic_version) == '0.0.0':
+                print_error(
+                    'Version of update candidate can not be determined'
+                )
+            elif str(mod_old.version) == '0.0.0':
+                print_error('Installed mod version can not be determined')
+            else:
+                if ic_version <= mod_old.version:
+                    print_info(f'No update for {mod_old.name} available')
+                    return
+
+            print_info(
+                f'Update {modid} from "{mod_old.version}" to "{ic_version}"'
+            )
+
+            # Mod will be installed if we are here. Remove old one
+            self.mod_remove(modid)
+
+        # Names, paths, etc.
+        download_url = install_candidate['mainfile'].replace(' ', '%20')
+        zip_name = download_url.split('=')[-1]
+        mod_path = self.mods_path / zip_name
+
+        # Download new mod to /Mods/ folder
+        print_info(
+            'Download mod version {ver}...'.format(
+                ver=install_candidate.get('modversion', 'UNKNOWN')
+            )
+        )
+        urlretrieve(download_url, mod_path)
+
+        # Validate exitens
+        if not mod_path.exists():
+            print_error(
+                'Download failed. Mod not found at expected path {mod_path}'
+            )
+            return
+
+        # Add mod to mods list and remove old one if applicable
+        mod = Mod(mod_path)
+        self.mods.append(mod)
+
+        print_info(f'Mod {mod.nam or mod.archive} sucessfully installed')
+
+    def mod_update(self, modid: str):
+        '''
+        Update an existing mod
+        '''
+        # Update single mod
+        if modid:
+            self.mod_install(modid, update=True)
+            return
+
+        # Update all mods
+        # Ask for confirmation
+        inp = input('Update all available mods? (y/n)').lower().strip()
+        if inp != 'y':
+            print_info('Updates will not be installed')
+            return
+
+        # Create backup
+        self.backup_create()
+
+        # Update
+        mods = self.mods[:]
+        for mod in mods:
+            self.mod_install(mod.modid, update=True)
+
+    def mod_remove(self, modid: str):
+        '''
+        Remove by name modid or general name (fallback)
+        '''
+        mod = self._mod_get(modid)
+        if not mod:
+            print_error('Mod not found')
+            return
+
+        # Delete mods archive from /Mods/ folder
+        mod.archive.unlink(missing_ok=True)
+
+        # Sanity check that mod is really gone
+        if mod.archive.exists():
+            print_error('Unable to remove mod')
+            return
+
+        try:
+            self.mods.remove(mod)
+        except ValueError:
+            pass
+
+        print_info(f'Removed mod: {modid}')
+
+    def backup_create(self):
+        '''
+        Create backup of the /Mods/ folder
+        '''
+        backup_time = str(datetime.datetime.now().strftime("%y%m%d_%H%M%S"))
+        backup_path = self.data_path / f'Mods.{backup_time}'
+
+        print_info(f'Creating backup of Mods folder at: {backup_path}')
+        try:
+            shutil.copytree(self.mods_path, backup_path)
+        except PermissionError:
+            print_error('Permission error - Unbale to create backup')
+            print_error(
+                'This script must be used by the user '
+                'who owns the VS data folder'
+            )
+            return
+
+        print_info('Successfully created backup')
+
+
+def get_data_path() -> Path:
+    '''
+    Crude function to get VS data path from user to manage the mods for
+    '''
+    # Default data paths for mod managing
+    data_paths_default: List[Path] = [
+        Path('/var/vintagestory/data'),
+        Path('~/.config/VintagestoryData')
+    ]
+
+    data_paths_available: Dict[int, Path] = {k + 1: v for k, v in enumerate(
+        path.expanduser() for path in data_paths_default
+        if path.expanduser().exists()
+    )}
+
+    print('''Please choose one of the follwing default paths where you
+would like to manage your mods or type in a path yourself:
+''')
+
+    for index, path in data_paths_available.items():
+        print(f'{index}: {path}')
+
+    data_path_ret = None
+    while not data_path_ret:
+        inp = input('> ').strip()
+        if inp.isdigit():
+            data_path_ret = data_paths_available.get(int(inp))
+        elif inp:
+            data_path_ret = Path(inp).expanduser()
+            print(f'p: {data_path_ret}')
+            if not data_path_ret.exists():
+                print_error("Provided path does not exist")
+                data_path_ret = None
+            elif not (data_path_ret / 'Mods').exists():
+                print_error('No /Mods/ folder in given path')
+                data_path_ret = None
+
+    return data_path_ret
+
+
+def get_version() -> Version:
+    '''
+    Crude function to get VS game version from user
+    '''
+    print('Please enter the current server version:')
+    while True:
+        inp = input('> ').strip()
+        if not inp:
+            continue
+
+        try:
+            return Version(inp)
+        except AssertionError:
+            print_error('''Not a valid version.
+Version number must consist of three numbers seperate by a dot (".").
+Example: 1.20.4''')
+
+
+HELPTEXT = '''VSModManager commands
+list [name]
+    - list install mods or information about a single one'''
+
+if __name__ == '__main__':
+
+    data_path = get_data_path()
+    if not data_path:
+        sys.exit(1)
+
+    version = get_version()
+
+    os.system('clear')
+    print(f'VSModManager v{VERSION}')
+    print(f'Server version: {version}\n')
+
+    modmanager = ModManager(data_path=data_path, version=version)
+
+    print_info(f'Managing your mods at "{modmanager.mods_path}/"')
+    print_info('Type <help> for a list of commands')
+
+    while True:
+        try:
+            cmd = input('> ').lower().strip().split()
+            if not cmd:
+                continue
+        except KeyboardInterrupt:
+            continue
+        except EOFError:
+            break
+
+        cmd_main = cmd[0]
+        if cmd_main == 'list':
+            modmanager.mod_list(' '.join(cmd[1:]))
+        elif cmd_main == 'install':
+            modmanager.mod_install(' '.join(cmd[1:]))
+        elif cmd_main == 'update':
+            modmanager.mod_update(' '.join(cmd[1:]))
+        elif cmd_main == 'backup':
+            modmanager.backup_create()
+        elif cmd_main == 'remove':
+            modmanager.mod_remove(' '.join(cmd[1:]))
+        elif cmd_main in ('exit', 'quit'):
+            break
+        else:
+            print(HELPTEXT)
+
+    print('Exiting VSModManager...')
