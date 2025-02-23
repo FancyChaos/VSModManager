@@ -365,6 +365,10 @@ class ModManager:
         Install/update a mod by modid
         TODO: Install by modname and not modid
         '''
+        if not modid:
+            print_error('No modid given')
+            return
+
         # Check if mod not already installed
         mod_old = self._mod_get(modid)
         if not update and mod_old:
@@ -399,7 +403,7 @@ class ModManager:
             # Suggest to install newest release
             game_versions = newest_release.get('tags', [])
             print(
-                f'Install newest release of mod intended for game versions {', '.join(game_versions)} (y/n)?'
+                f'Install newest release of mod intended for game version(s) {', '.join(game_versions)} (y/n)?'
             )
             inp = input('> ').lower().strip()
             if inp != 'y':
@@ -468,7 +472,8 @@ class ModManager:
 
         # Update all mods
         # Ask for confirmation
-        inp = input('Update all available mods? (y/n)').lower().strip()
+        print('Update all available mods? (y/n)')
+        inp = input('> ').lower().strip()
         if inp != 'y':
             print_info('Updates will not be installed')
             return
@@ -585,8 +590,16 @@ Example: 1.20.4''')
 
 
 HELPTEXT = '''VSModManager commands
-list [name]
-    - list install mods or information about a single one'''
+list [mod]
+    - list installed mods or information about a single one
+install <modid>
+    - Install a mod by modid
+update [modid]
+    - Update all installed mods or a single one
+remove <modid>
+    - Remove a mod
+backup
+    - Backup /Mods/ folder'''
 
 if __name__ == '__main__':
 
