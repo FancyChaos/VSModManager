@@ -291,6 +291,18 @@ class ModManager:
                     return release
         return {}
 
+    def _get_newest_release(self, modstatus: Dict) -> Dict:
+        '''
+        Get newest release of modstatus
+        '''
+        releases = modstatus.get('releases')
+        if not releases:
+            print_error('Could not parse mod API response')
+            return {}
+
+        # Seems like release are sorted desc
+        return releases[0]
+
     def _mods_refresh(self):
         '''
         Iterate over all mods in the mods directory and save them
@@ -370,9 +382,31 @@ class ModManager:
         # Get newest release of the mod compatible to the game version
         install_candidate: Dict = self._get_release_candidate(modstatus)
 
+        # No install candidate for our game version found
         if not install_candidate:
             print_error('No install candidate for your version found')
-            return
+            print_info('Checking newest release...')
+            # Ge newest available release of mod
+            # We will give the option to install newest release
+            # even if not technically supported by our game version
+            newest_release = self._get_newest_release(modstatus)
+            # Check that newest release is newer than our currently installed version
+            if update and mod_old:
+                if Version(newest_release.get('modversion', '0.0.0')) <= mod_old.version:
+                    print_info('Newest release already installed')
+                    return
+
+            # Suggest to install newest release
+            game_versions = newest_release.get('tags', [])
+            print(
+                f'Install newest release of mod intended for game versions {', '.join(game_versions)} (y/n)?'
+            )
+            inp = input('> ').lower().strip()
+            if inp != 'y':
+                print_info('Mod will not be installed')
+                return
+
+            install_candidate = newest_release
 
         # Check if install candidate is an update to currently installed mod
         if update and mod_old:
