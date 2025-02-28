@@ -37,6 +37,8 @@ def parse_json(json_string: str) -> Dict:
     Tries to repair broken JSON along the way.
     Somehow VS mod devs love to screw up JSON -.-
     '''
+    json_string = json_string.strip()
+
     if not json_string:
         return {}
 
@@ -49,11 +51,21 @@ def parse_json(json_string: str) -> Dict:
     print_error(f'Error while parsing JSON:\n{json_string}')
     print_info("Trying to repair broken JSON...")
 
+    # Replace whitespaces after newline
+    json_string = re.sub(r'\n(\s*)', '\n', json_string)
+
+    # Replace newlines
+    json_string = ''.join(json_string.splitlines())
+
     # Find an replace actions to potentially fix broken JSON
     repair_actions = (
         # Remove superflous comma at end
         (r'},\s*\}\Z', '}}'),
         (r'],\s*\}\Z', ']}'),
+
+        # Try to quote keys
+        (r'{(\w*):', r'{"\g<1>":'),
+        (r',(\w*):', r',"\g<1>":')
     )
 
     for repair_action in repair_actions:
@@ -270,7 +282,7 @@ class ModManager:
             print_error('No valid response from vintage story API')
 
         if mod_status.get('statuscode', '200') != '200':
-            print_error('Mod could not be found')
+            print_error('Mod could not be found on official VS moddb')
             return {}
 
         return mod_status.get('mod', {})
@@ -360,7 +372,7 @@ class ModManager:
 
         mod.print_all()
 
-    def mod_install(self, modid: str, update: bool = False):
+    def mod_install(self, modid: str, update: bool = False, automatic: bool = False):
         '''
         Install/update a mod by modid
         TODO: Install by modname and not modid
@@ -380,11 +392,17 @@ class ModManager:
         modstatus = self._get_mod_api(modid)
 
         if not modstatus:
-            print_error('Mod could not be found')
+            print_error('Mod not found')
             return
 
         # Get newest release of the mod compatible to the game version
         install_candidate: Dict = self._get_release_candidate(modstatus)
+
+        if not install_candidate and automatic:
+            # We do not install potentially incompaitble versions
+            # in autmatic mode
+            print_error('No install candidate for your version found')
+            return
 
         # No install candidate for our game version found
         if not install_candidate:
@@ -394,17 +412,24 @@ class ModManager:
             # We will give the option to install newest release
             # even if not technically supported by our game version
             newest_release = self._get_newest_release(modstatus)
-            # Check that newest release is newer than our currently installed version
+            # Check that newest release is newer than
+            # our currently installed version
             if update and mod_old:
-                if Version(newest_release.get('modversion', '0.0.0')) <= mod_old.version:
+                if Version(
+                    newest_release.get('modversion', '0.0.0')
+                ) <= mod_old.version:
                     print_info('Newest release already installed')
                     return
 
             # Suggest to install newest release
             game_versions = newest_release.get('tags', [])
-            print(
-                f'Install newest release of mod intended for game version(s) {', '.join(game_versions)} (y/n)?'
+            game_versions_str = ', '.join(game_versions)
+            print_info('Mod does not support your Game version')
+            print_info(
+                f'Supported game versions of newest release: {game_versions_str}'
             )
+
+            print('Install newest release of mod anyway? (y/n)')
             inp = input('> ').lower().strip()
             if inp != 'y':
                 print_info('Mod will not be installed')
@@ -484,7 +509,7 @@ class ModManager:
         # Update
         mods = self.mods[:]
         for mod in mods:
-            self.mod_install(mod.modid, update=True)
+            self.mod_install(mod.modid, update=True, automatic=True)
 
     def mod_remove(self, modid: str):
         '''
