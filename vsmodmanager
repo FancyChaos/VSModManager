@@ -387,10 +387,15 @@ class ModManager:
         if not modid:
             return
 
-        # Check if mod not already installed
+        # Check if mod already installed
         mod_old = self._mod_get(modid)
-        if not update and mod_old:
+        if mod_old and not update:
             print_error(f'Mod "{modid}" already installed')
+            return
+
+        # If mod not installed and update flag is given -> do nothing
+        if not mod_old and update:
+            print_error(f'Mod "{modid}" not installed')
             return
 
         # Get available mod versions and info
