@@ -77,7 +77,7 @@ def parse_json(json_string: str) -> Dict:
         except json.JSONDecodeError:
             pass
 
-    print_error(f'Could not repair JSON: {json_string_raw}')
+    print_error(f'Unable to parse JSON: {json_string_raw}')
 
     return {}
 
@@ -130,7 +130,7 @@ class Version:
 
     def __eq__(self, other):
         '''
-        Implement "Version == Version"
+        Implement "Version == Version" and "Version != Version"
         '''
         if len(self) != len(other):
             return False
@@ -139,7 +139,7 @@ class Version:
 
     def __gt__(self, other):
         '''
-        Implement "Version > Version"
+        Implement "Version > Version" and "Version < Version"
         '''
         if self.is_rc and other.is_rc:
             return self.version_group > other.version_group
@@ -162,7 +162,7 @@ class Version:
 
     def __ge__(self, other):
         '''
-        Implement "Version >= Version"
+        Implement "Version >= Version" and "Version <= Version"
         '''
         if self.version_group == other.version_group:
             return True
@@ -264,7 +264,8 @@ class ModManager:
             with urlopen(f'{api_url}/{modid}') as resp:
                 if resp.status != 200:
                     print_error(
-                        'Error while accessing official vintage story API'
+                        'Error while accessing official '
+                        'vintage story ModDB API'
                     )
                     print_error(
                         f'HTTP response from vintage story API: {resp.status}'
@@ -273,7 +274,7 @@ class ModManager:
                 mod_status_raw = resp.read()
         except Exception as exc:
             print_error(
-                'Fatal error while accessing official vintage story API'
+                'Fatal error while accessing official vintage story ModDB API'
             )
             print_error(exc)
             return {}
@@ -281,10 +282,12 @@ class ModManager:
         # Convert returned JSON to dictionary
         mod_status = parse_json(mod_status_raw)
         if not mod_status:
-            print_error('No valid response from vintage story API')
+            print_error('No valid response from vintage story ModDB API')
 
         if mod_status.get('statuscode', '200') != '200':
-            print_error('Mod could not be found on official VS moddb')
+            print_error(
+                'Mod could not be found on official vintage story ModDB API'
+            )
             return {}
 
         return mod_status.get('mod', {})
@@ -391,11 +394,13 @@ class ModManager:
             return
 
         # Get available mod versions and info
-        print_info('Get mod releases...')
+        print_info(f'Get release file of "{modid}"...')
         modstatus = self._get_mod_api(modid)
 
         if not modstatus:
-            print_error('Mod not found')
+            print_error(
+                f'Release file for "{modid}" could not be fetched from ModDB'
+            )
             return
 
         # Get newest release of the mod compatible to the game version
@@ -429,7 +434,8 @@ class ModManager:
             game_versions_str = ', '.join(game_versions)
             print_info('Mod does not support your Game version')
             print_info(
-                f'Supported game versions of newest release: {game_versions_str}'
+                f'Supported game versions of newest release: '
+                f'{game_versions_str}'
             )
 
             print('Install newest release of mod anyway? (y/n)')
@@ -453,12 +459,8 @@ class ModManager:
                 print_error('Installed mod version can not be determined')
             else:
                 if ic_version <= mod_old.version:
-                    print_info(f'No update for {mod_old.name} available')
+                    print_info(f'No update for "{mod_old.name}" available')
                     return
-
-            print_info(
-                f'Update {modid} from "{mod_old.version}" to "{ic_version}"'
-            )
 
             # Mod will be installed if we are here. Remove old one
             self.mod_remove(modid)
@@ -469,17 +471,13 @@ class ModManager:
         mod_path = self.mods_path / zip_name
 
         # Download new mod to /Mods/ folder
-        print_info(
-            'Download mod version {ver}...'.format(
-                ver=install_candidate.get('modversion', 'UNKNOWN')
-            )
-        )
         urlretrieve(download_url, mod_path)
 
-        # Validate exitens
+        # Validate existence
         if not mod_path.exists():
             print_error(
-                'Download failed. Mod not found at expected path {mod_path}'
+                f'Download of "{modid}" failed. '
+                f'Mod not found at expected path: {mod_path}'
             )
             return
 
@@ -487,7 +485,7 @@ class ModManager:
         mod = Mod(mod_path)
         self.mods.append(mod)
 
-        print_info(f'Mod {mod.nam or mod.archive} sucessfully installed')
+        print_info(f'Mod "{mod.nam or mod.archive}" sucessfully installed')
 
     def mod_update(self, modid: str, automatic: bool = False):
         '''
@@ -495,6 +493,7 @@ class ModManager:
         '''
         # Update single mod
         if modid:
+            print_info(f'Updating "{modid}"...')
             self.mod_install(modid, update=True, automatic=automatic)
             return
 
@@ -511,8 +510,10 @@ class ModManager:
         self.backup_create()
 
         # Update
+        print_info('Updating all installed mods...')
         mods = self.mods[:]
         for mod in mods:
+            print_info(f'Updating "{mod.modid}"...')
             self.mod_install(mod.modid, update=True, automatic=True)
 
     def mod_remove(self, modid: str):
@@ -537,7 +538,7 @@ class ModManager:
         except ValueError:
             pass
 
-        print_info(f'Removed mod: {modid}')
+        print_info(f'Mod removed: "{modid}"')
 
     def backup_create(self):
         '''
