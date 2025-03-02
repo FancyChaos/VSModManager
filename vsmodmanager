@@ -7,6 +7,7 @@ import re
 import os
 import shutil
 import datetime
+import argparse
 from urllib.request import urlopen, urlretrieve
 from pathlib import Path
 from typing import List, Dict, Optional
@@ -37,6 +38,7 @@ def parse_json(json_string: str) -> Dict:
     Tries to repair broken JSON along the way.
     Somehow VS mod devs love to screw up JSON -.-
     '''
+    json_string_raw = json_string
     json_string = json_string.strip()
 
     if not json_string:
@@ -48,8 +50,6 @@ def parse_json(json_string: str) -> Dict:
         pass
 
     # Error while parsing happened if we get here
-    print_error(f'Error while parsing JSON:\n{json_string}')
-    print_info("Trying to repair broken JSON...")
 
     # Replace whitespaces after newline
     json_string = re.sub(r'\n(\s*)', '\n', json_string)
@@ -73,12 +73,11 @@ def parse_json(json_string: str) -> Dict:
         try:
             json_string = re.sub(find, replace, json_string)
             json_repaired = json.loads(json_string)
-            print_info('JSON successfully repaired')
             return json_repaired
         except json.JSONDecodeError:
             pass
 
-    print_error('Could not repair JSON')
+    print_error(f'Could not repair JSON: {json_string_raw}')
 
     return {}
 
@@ -243,7 +242,6 @@ class ModManager:
             print_error(f'Could not find Mods directory: {self.mods_path}')
             sys.exit(2)
 
-        print_info('Loading mods...')
         self._mods_refresh()
 
     @staticmethod
@@ -333,18 +331,20 @@ class ModManager:
         '''
         Get mod by modid or name (fallback)
         '''
-        modid = modid.lower()
+        modid = modid.lower().strip()
+        if not modid:
+            return None
 
         mod = [
             mod for mod in self.mods
-            if modid in mod.modid.lower()
+            if modid in mod.modid.lower().strip()
         ]
         if mod:
             return mod[0]
 
         mod = [
             mod for mod in self.mods
-            if modid in mod.name.lower()
+            if modid in mod.name.lower().strip()
         ]
         if mod:
             return mod[0]
@@ -368,6 +368,7 @@ class ModManager:
 
         mod = self._mod_get(modid)
         if not mod:
+            print_error(f'Mod "{modid}" not found')
             return
 
         mod.print_all()
@@ -375,7 +376,6 @@ class ModManager:
     def mod_install(self, modid: str, update: bool = False, automatic: bool = False):
         '''
         Install/update a mod by modid
-        TODO: Install by modname and not modid
         '''
         if not modid:
             print_error('No modid given')
@@ -486,22 +486,23 @@ class ModManager:
 
         print_info(f'Mod {mod.nam or mod.archive} sucessfully installed')
 
-    def mod_update(self, modid: str):
+    def mod_update(self, modid: str, automatic: bool = False):
         '''
         Update an existing mod
         '''
         # Update single mod
         if modid:
-            self.mod_install(modid, update=True)
+            self.mod_install(modid, update=True, automatic=automatic)
             return
 
         # Update all mods
         # Ask for confirmation
-        print('Update all available mods? (y/n)')
-        inp = input('> ').lower().strip()
-        if inp != 'y':
-            print_info('Updates will not be installed')
-            return
+        if not automatic:
+            print('Update all available mods? (y/n)')
+            inp = input('> ').lower().strip()
+            if inp != 'y':
+                print_info('Updates will not be installed')
+                return
 
         # Create backup
         self.backup_create()
@@ -517,7 +518,7 @@ class ModManager:
         '''
         mod = self._mod_get(modid)
         if not mod:
-            print_error('Mod not found')
+            print_error(f'Mod "{modid}" not found')
             return
 
         # Delete mods archive from /Mods/ folder
@@ -585,7 +586,6 @@ would like to manage your mods or type in a path yourself:
             data_path_ret = data_paths_available.get(int(inp))
         elif inp:
             data_path_ret = Path(inp).expanduser()
-            print(f'p: {data_path_ret}')
             if not data_path_ret.exists():
                 print_error("Provided path does not exist")
                 data_path_ret = None
@@ -626,8 +626,11 @@ remove <modid>
 backup
     - Backup /Mods/ folder'''
 
-if __name__ == '__main__':
 
+def main_cli():
+    '''
+    Entry point to manually manage mod via CLI
+    '''
     data_path = get_data_path()
     if not data_path:
         sys.exit(1)
@@ -670,3 +673,105 @@ if __name__ == '__main__':
             print(HELPTEXT)
 
     print('Exiting VSModManager...')
+
+
+def main_argparse():
+    '''
+    Entry point to automatically manage mods with argparse
+    '''
+    parser = argparse.ArgumentParser(
+        prog='vsmodmanager',
+        description='Vintage story mod manager',
+        epilog='https://Github.com/FancyChaos/VSModManager'
+    )
+
+    # Required: Data path and game version
+    required = parser.add_argument_group('Required')
+    required.add_argument(
+        '-d',
+        '--data-path',
+        help='VS data path to manage mods of',
+        type=str,
+        required=True
+    )
+    required.add_argument(
+        '-v',
+        '--version',
+        help='VS game version to manage mods for',
+        type=str,
+        required=True
+    )
+
+    # Optional: Action (install, update, remove, etc.)
+    optional = parser.add_argument_group('Optional')
+    optional.add_argument(
+        '-i',
+        '--install',
+        help='Install a mod by modid',
+        action='store_true'
+    )
+    optional.add_argument(
+        '-u',
+        '--update',
+        help='Update a mod by modid',
+        action='store_true'
+    )
+    optional.add_argument(
+        '-r',
+        '--remove',
+        help='Remove mod',
+        action='store_true'
+    )
+    optional.add_argument(
+        '-l',
+        '--list',
+        help='List information about single mod or all installed',
+        action='store_true'
+    )
+    optional.add_argument(
+        '-b',
+        '--backup',
+        help='Create backup of /Mods/ folder in given data path',
+        action='store_true'
+    )
+
+    # Final positional argument is modid/modname
+    parser.add_argument(
+        'mod',
+        default='',
+        type=str,
+        nargs='?'
+    )
+
+    args = parser.parse_args()
+
+    # Parse required arguments
+    data_path = Path(args.data_path)
+    version = Version(args.version)
+
+    # Create ModManager instance
+    modmanager = ModManager(data_path, version)
+
+    # Take action
+    mod = args.mod
+    if args.install:
+        modmanager.mod_install(mod, update=False, automatic=True)
+    elif args.update:
+        modmanager.mod_update(mod, automatic=True)
+    elif args.remove:
+        modmanager.mod_remove(mod)
+    elif args.list:
+        modmanager.mod_list(mod)
+    elif args.backup:
+        modmanager.backup_create()
+    else:
+        print_error('No action given')
+
+
+if __name__ == '__main__':
+    if len(sys.argv) > 1:
+        # Run with argparse
+        main_argparse()
+    else:
+        # Run CLI application to manage mods
+        main_cli()
