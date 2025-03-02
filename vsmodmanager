@@ -192,9 +192,13 @@ class Mod:
         Parse a mod archive
         '''
         with zipfile.ZipFile(self.archive, 'r') as archive:
-            modinfo_string = archive.read(
-                'modinfo.json'
-            ).decode().strip()
+            try:
+                modinfo_string = archive.read(
+                    'modinfo.json'
+                ).decode().strip()
+            except KeyError:
+                # No modinfo.json found
+                return {}
 
         modinfo = parse_json(modinfo_string)
         if not modinfo:
@@ -378,7 +382,6 @@ class ModManager:
         Install/update a mod by modid
         '''
         if not modid:
-            print_error('No modid given')
             return
 
         # Check if mod not already installed
