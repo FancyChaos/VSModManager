@@ -40,19 +40,20 @@ Use the interactive mode if you want to install/update a mod that is not made fo
 Following examples for the Non-interactive mode. The interactive mode should hopefully be self-explanatory
 
 1. List all installed mods
-`./vsmodmanager -d /var/vintagestory/data/ -v 1.20.3 -l`
+- `./vsmodmanager -d /var/vintagestory/data/ -v 1.20.3 -l`
 2. List information about one specific mod
-`./vsmodmanager -d /var/vintagestory/data/ -v 1.20.3 -l knapster`
+- `./vsmodmanager -d /var/vintagestory/data/ -v 1.20.3 -l knapster`
 3. Install a mod
-`./vsmodmanager -d /var/vintagestory/data/ -v 1.20.3 -i morepiles`
+- `./vsmodmanager -d /var/vintagestory/data/ -v 1.20.3 -i morepiles`
 4. Update a single mod
-`./vsmodmanager -d /var/vintagestory/data/ -v 1.20.3 -u morepiles`
+- `./vsmodmanager -d /var/vintagestory/data/ -v 1.20.3 -u morepiles`
 5. Update all installed mods
-`./vsmodmanager -d /var/vintagestory/data/ -v 1.20.3 -u`
+- `./vsmodmanager -d /var/vintagestory/data/ -v 1.20.3 -u`
 6. Remove a mod
-`./vsmodmanager -d /var/vintagestory/data/ -v 1.20.3 -r morepiles`
+- `./vsmodmanager -d /var/vintagestory/data/ -v 1.20.3 -r morepiles`
 
 For more see the help text
+
 `./vsmodmanager -h`
 
 ## Planned
