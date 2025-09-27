@@ -31,7 +31,7 @@ Make the user who uses this mod manager has the permission to see/edit the vinta
 
 #### Caveats
 
-The Non-interactive mode does not require any further input from the user. Due to that fact only sane decisions are made to gurantee stability.  A mod for example will ONLY be installed/updated if the target game version of it matches the given game version exactly.
+The Non-interactive mode does not require any further input from the user. Because of that only sane decisions are made to gurantee stability. A mod for example will ONLY be installed/updated if its target game version matches the given game version exactly.
 
 Use the interactive mode if you want to install/update a mod that is not made for your specific game version. 
 
@@ -40,17 +40,19 @@ Use the interactive mode if you want to install/update a mod that is not made fo
 Following examples for the Non-interactive mode. The interactive mode should hopefully be self-explanatory
 
 1. List all installed mods
-- `./vsmodmanager -d /var/vintagestory/data/ -v 1.20.3 -l`
+- `./vsmodmanager -d /var/vintagestory/data/ -l`
 2. List information about one specific mod
-- `./vsmodmanager -d /var/vintagestory/data/ -v 1.20.3 -l knapster`
-3. Install a mod
+- `./vsmodmanager -d /var/vintagestory/data/ -l knapster`
+3. Install lates version of mod by omitting the game version
+- `./vsmodmanager -d /var/vintagestory/data/ -i morepiles`
+4. Install a mod for a specific game version
 - `./vsmodmanager -d /var/vintagestory/data/ -v 1.20.3 -i morepiles`
-4. Update a single mod
+5. Update a single mod (Game version can be ommited again)
 - `./vsmodmanager -d /var/vintagestory/data/ -v 1.20.3 -u morepiles`
-5. Update all installed mods
+6. Update all installed mods
 - `./vsmodmanager -d /var/vintagestory/data/ -v 1.20.3 -u`
-6. Remove a mod
-- `./vsmodmanager -d /var/vintagestory/data/ -v 1.20.3 -r morepiles`
+7. Remove a mod
+- `./vsmodmanager -d /var/vintagestory/data/ -r morepiles`
 
 For more see the help text
 

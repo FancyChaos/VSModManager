@@ -742,7 +742,7 @@ def main_argparse():
         '-v',
         '--version',
         help='VS game version to manage mods for. '
-             'Always install latest version if no version is given',
+             'Always install latest version of mods if no version is given',
         default='latest',
         type=str
     )
