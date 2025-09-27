@@ -32,30 +32,29 @@ def print_error(*args, **kwargs):
     print(*args, **kwargs)
 
 
-def parse_json(json_string: str) -> Dict:
+def parse_json(js: str | bytes) -> Dict:
     '''
     Convert pure JSON string to a python dictionary.
     Tries to repair broken JSON along the way.
     Somehow VS mod devs love to screw up JSON -.-
     '''
-    json_string_raw = json_string
-    json_string = json_string.strip()
+    js = js.strip()
 
-    if not json_string:
+    if not js:
         return {}
 
     try:
-        return json.loads(json_string)
+        return json.loads(js)
     except json.JSONDecodeError:
         pass
 
     # Error while parsing happened if we get here
 
     # Replace whitespaces after newline
-    json_string = re.sub(r'\n(\s*)', '\n', json_string)
+    js = re.sub(r'\n(\s*)', '\n', js)
 
     # Replace newlines
-    json_string = ''.join(json_string.splitlines())
+    js = ''.join(js.splitlines())
 
     # Find an replace actions to potentially fix broken JSON
     repair_actions = (
@@ -71,13 +70,13 @@ def parse_json(json_string: str) -> Dict:
     for repair_action in repair_actions:
         find, replace = repair_action
         try:
-            json_string = re.sub(find, replace, json_string)
-            json_repaired = json.loads(json_string)
+            js = re.sub(find, replace, js)
+            json_repaired = json.loads(js)
             return json_repaired
         except json.JSONDecodeError:
             pass
 
-    print_error(f'Unable to parse JSON: {json_string_raw}')
+    print_error(f'Unable to parse JSON: {js}')
 
     return {}
 
@@ -195,14 +194,14 @@ class Mod:
             try:
                 modinfo_string = archive.read(
                     'modinfo.json'
-                ).decode().strip()
+                ).strip()
             except KeyError:
                 # No modinfo.json found
                 return {}
 
         modinfo = parse_json(modinfo_string)
         if not modinfo:
-            print_error(f'Could not load mod: {self.archive}')
+            print_error(f'Unable to read corrupted mod archive details: {self.archive}')
             return {}
 
         # Convert keys to all lowercase for easy access
@@ -490,7 +489,7 @@ class ModManager:
         mod = Mod(mod_path)
         self.mods.append(mod)
 
-        print_info(f'Mod "{mod.nam or mod.archive}" sucessfully installed')
+        print_info(f'Mod "{mod.name or mod.archive}" sucessfully installed')
 
     def mod_update(self, modid: str, automatic: bool = False):
         '''
