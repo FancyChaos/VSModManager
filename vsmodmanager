@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import List, Dict, Optional
 
 
-VERSION = '0.0.1'
+VERSION = '1.0.0'
 
 
 def print_info(*args, **kwargs):
@@ -38,6 +38,7 @@ def parse_json(js: str | bytes) -> Dict:
     Tries to repair broken JSON along the way.
     Somehow VS mod devs love to screw up JSON -.-
     '''
+    js_raw = js
     js = js.strip()
 
     if not js:
@@ -51,7 +52,7 @@ def parse_json(js: str | bytes) -> Dict:
     # Error while parsing happened if we get here
 
     # Replace whitespaces after newline
-    js = re.sub(r'\n(\s*)', '\n', js)
+    js = re.sub(r'\n(\s*)', '\n', str(js))
 
     # Replace newlines
     js = ''.join(js.splitlines())
@@ -76,7 +77,7 @@ def parse_json(js: str | bytes) -> Dict:
         except json.JSONDecodeError:
             pass
 
-    print_error(f'Unable to parse JSON: {js}')
+    print_error(f'Unable to parse JSON: {js_raw!r}')
 
     return {}
 
@@ -93,10 +94,18 @@ class Version:
         '''
         self._version = version
 
-        self.major = self.minor = self.patch = self.rc = 0
-        self.is_rc = False
-
         version = version.lower().strip()
+        self.version = version
+
+        self.major = self.minor = self.patch = self.rc = 0
+        self.version_group: tuple[int, ...] = ()
+        self.is_rc = False
+        self.latest = False
+
+        # Special case: Latest version only uses lates mods
+        if version == 'latest':
+            self.latest = True
+            return
 
         # Cleanup string by only leaving digits and dots
         # v1.20.0-rc.6 -> 1.20.0.6
@@ -116,7 +125,7 @@ class Version:
             self.is_rc = True
 
         self.version = version
-        self.version_group = version_group
+        self.version_group = version_group  # E.g.: (1, 21, 1)
 
     def __repr__(self):
         return self._version
@@ -201,7 +210,9 @@ class Mod:
 
         modinfo = parse_json(modinfo_string)
         if not modinfo:
-            print_error(f'Unable to read corrupted mod archive details: {self.archive}')
+            print_error(
+                f'Unable to read corrupted mod archive details: {self.archive}'
+            )
             return {}
 
         # Convert keys to all lowercase for easy access
@@ -236,8 +247,8 @@ class ModManager:
     '''
     mods: List[Mod] = []
 
-    def __init__(self, data_path: Path, version: Version):
-        self.version = version
+    def __init__(self, data_path: Path, vs_version: Version):
+        self.vs_version = vs_version
 
         self.data_path = data_path
         self.mods_path = self.data_path / 'Mods'
@@ -303,8 +314,13 @@ class ModManager:
         # Seems like release are sorted desc
         for release in releases:
             for tag in release.get('tags', []):
-                if Version(tag) == self.version:
+                # Return latest release if lartest vs_version
+                # (aka no version given)
+                if self.vs_version.latest:
                     return release
+                elif Version(tag) == self.vs_version:
+                    return release
+
         return {}
 
     def _get_newest_release(self, modstatus: Dict) -> Dict:
@@ -361,6 +377,9 @@ class ModManager:
         '''
         Pretty print list of installed mods
         '''
+        if not self.mods:
+            print("No mods found")
+
         for mod in self.mods:
             mod.print_default()
 
@@ -379,7 +398,8 @@ class ModManager:
 
         mod.print_all()
 
-    def mod_install(self, modid: str, update: bool = False, automatic: bool = False):
+    def mod_install(self, modid: str, update: bool = False,
+                    automatic: bool = False):
         '''
         Install/update a mod by modid
         '''
@@ -413,7 +433,10 @@ class ModManager:
         if not install_candidate and automatic:
             # We do not install potentially incompaitble versions
             # in autmatic mode
-            print_error('No install candidate for your version found')
+            print_error(
+                'No install candidate for your version '
+                f'({self.vs_version}) found'
+            )
             return
 
         # No install candidate for our game version found
@@ -489,7 +512,12 @@ class ModManager:
         mod = Mod(mod_path)
         self.mods.append(mod)
 
-        print_info(f'Mod "{mod.name or mod.archive}" sucessfully installed')
+        if mod.name:
+            print_info(
+                f'Mod "{mod.name} [{mod.version}]" successfully installed'
+            )
+        else:
+            print_info(f'Mod "{mod.archive}" successfully installed')
 
     def mod_update(self, modid: str, automatic: bool = False):
         '''
@@ -608,11 +636,16 @@ def get_version() -> Version:
     '''
     Crude function to get VS game version from user
     '''
-    print('Please enter the current server version:')
+    print(
+        '''
+Please enter the target game version.
+The latest mods will always be installed if no version
+is given.'''
+    )
     while True:
         inp = input('> ').strip()
         if not inp:
-            continue
+            return Version('latest')
 
         try:
             return Version(inp)
@@ -649,7 +682,7 @@ def main_cli():
     print(f'VSModManager v{VERSION}')
     print(f'Server version: {version}\n')
 
-    modmanager = ModManager(data_path=data_path, version=version)
+    modmanager = ModManager(data_path, version)
 
     print_info(f'Managing your mods at "{modmanager.mods_path}/"')
     print_info('Type <help> for a list of commands')
@@ -702,16 +735,19 @@ def main_argparse():
         type=str,
         required=True
     )
-    required.add_argument(
+
+    # Optional: Version
+    optional = parser.add_argument_group('Optional')
+    optional.add_argument(
         '-v',
         '--version',
-        help='VS game version to manage mods for',
-        type=str,
-        required=True
+        help='VS game version to manage mods for. '
+             'Always install latest version if no version is given',
+        default='latest',
+        type=str
     )
 
     # Optional: Action (install, update, remove, etc.)
-    optional = parser.add_argument_group('Optional')
     optional.add_argument(
         '-i',
         '--install',
